@@ -1,106 +1,116 @@
-import { createClient } from 'redis';
-import dotenv from 'dotenv';
+import { createClient } from "redis";
 
-dotenv.config();
+class RedisCache {
 
-export class RedisCache {
   constructor() {
+
     this.client = null;
+
     this.isConnected = false;
+
   }
 
-  async connect() {
-    try {
-      this.client = createClient({
-        host: process.env.REDIS_HOST || 'localhost',
+async connect() {
+
+  try {
+
+    this.client = createClient({
+
+      socket: {
+
+        host: process.env.REDIS_HOST || "localhost",
+
         port: process.env.REDIS_PORT || 6379,
-        password: process.env.REDIS_PASSWORD || undefined,
-      });
 
-      this.client.on('error', (err) => {
-        console.error('✗ Redis Client Error:', err.message);
-        this.isConnected = false;
-      });
+        reconnectStrategy: false
 
-      this.client.on('connect', () => {
-        console.log('✓ Redis Connected');
-        this.isConnected = true;
-      });
+      }
 
-      await this.client.connect();
-    } catch (error) {
-      console.error('✗ Redis Connection Error:', error.message);
-      console.log('⚠ Running without Redis cache');
-      this.isConnected = false;
-    }
+    });
+
+    this.client.on(
+      "error",
+      (err) => {
+
+        console.log(
+          "⚠ Redis unavailable:",
+          err.message || "Redis server not running"
+        );
+
+      }
+    );
+
+    await this.client.connect();
+
+    this.isConnected=true;
+
+    console.log(
+      "✓ Redis Connected"
+    );
+
   }
 
-  async get(key) {
-    if (!this.isConnected || !this.client) return null;
-    try {
-      const value = await this.client.get(key);
-      if (value) {
-        console.log(`✓ Cache HIT: ${key}`);
-        return JSON.parse(value);
-      }
-      console.log(`✗ Cache MISS: ${key}`);
+  catch(error){
+
+    console.log(
+      "⚠ Redis disabled. App continuing without cache."
+    );
+
+    this.isConnected=false;
+
+  }
+
+}
+
+
+  async get(key){
+
+    if(!this.isConnected)
       return null;
-    } catch (error) {
-      console.error(`✗ Cache GET error (${key}):`, error.message);
-      return null;
-    }
+
+    return await this.client.get(key);
+
   }
 
-  async set(key, value, expirySeconds = 3600) {
-    if (!this.isConnected || !this.client) return false;
-    try {
-      await this.client.setEx(key, expirySeconds, JSON.stringify(value));
-      console.log(`✓ Cache SET: ${key} (TTL: ${expirySeconds}s)`);
-      return true;
-    } catch (error) {
-      console.error(`✗ Cache SET error (${key}):`, error.message);
-      return false;
-    }
+
+  async set(key,value,ttl=300){
+
+    if(!this.isConnected)
+      return;
+
+    await this.client.set(
+      key,
+      value,
+      {EX:ttl}
+    );
+
   }
 
-  async delete(key) {
-    if (!this.isConnected || !this.client) return false;
-    try {
-      const result = await this.client.del(key);
-      console.log(`✓ Cache DELETE: ${key}`);
-      return result > 0;
-    } catch (error) {
-      console.error(`✗ Cache DELETE error (${key}):`, error.message);
-      return false;
-    }
+
+  async del(key){
+
+    if(!this.isConnected)
+      return;
+
+    await this.client.del(key);
+
   }
 
-  async invalidateAll() {
-    if (!this.isConnected || !this.client) return false;
-    try {
-      const keys = await this.client.keys('feeds:*');
-      if (keys.length > 0) {
-        await this.client.del(keys);
-        console.log(`✓ Cache INVALIDATED: ${keys.length} keys deleted`);
-      }
-      return true;
-    } catch (error) {
-      console.error('✗ Cache invalidation error:', error.message);
-      return false;
+
+  async disconnect(){
+
+    if(this.isConnected){
+
+      await this.client.quit();
+
+      console.log(
+        "✓ Redis disconnected"
+      );
+
     }
+
   }
 
-  async disconnect() {
-    if (this.client && this.isConnected) {
-      try {
-        await this.client.quit();
-        this.isConnected = false;
-        console.log('✓ Redis Disconnected');
-      } catch (error) {
-        console.error('✗ Redis disconnect error:', error.message);
-      }
-    }
-  }
 }
 
 export default RedisCache;
